@@ -1,5 +1,10 @@
 # tarsier-vision
+
+![LOGO](tarsier.png)
+
 Using a small IP camera for home surveilance, coded with python and optimized for raspberry pi. 
+
+> Tarsiers are small animals with enormous eyes; each eyeball is approximately 16 millimetres (0.63 in) in diameter and is as large as, or in some cases larger than, its entire brain. 
 
 # Setup
 
@@ -187,7 +192,7 @@ gasket                114688  1 apex
 
 ## Userspace modifications
 
-I am planning to add all of these in a dockerfile + some scripts so that at least the userspace methodology can be reproduced nicely. 
+I have created a dockerfile to easily run the app from. It can be built ... TODO
 
 On the userspace side the inference works by using pycoral that under the hood works with tensorflow lite runtime to load a model and send the weights and inference tensor to the TPU. Talking to the TPU is done through a tensorflow mechanism called "delegate" that will link to the libedgetpu static library. 
 
@@ -323,13 +328,12 @@ This will create, on the upper directory:
 -rw-r--r--  1 fra fra   1813 Sep  8 09:45 libedgetpu_16.0tf2.16.1-1_arm64.changes
 ```
 
-I copied them on the raspberry and then run the debuild command to install the deb. Note: I skipped the max frequency because of warnings from google. 
-
+Navigate there and then create the deb packages. 
 ```
-cd libedge_deb_folder
 debuild -us -uc -tc -b -a arm64 -d
 ```
 
+Copy on the raspberry and install. 
 
 
 
