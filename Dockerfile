@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-rtsp \
     libgstreamer1.0-dev \
     libgstreamer-plugins-base1.0-dev \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a venv
@@ -28,7 +29,8 @@ RUN python3.11 -m venv /opt/venv --system-site-packages
 RUN /opt/venv/bin/pip  install \
     "numpy==1.26.4" \
     "pillow==11.3.0" \
-    "pybind11==3.0.1"
+    "pybind11==3.0.1" \
+    "requests"
 
 # Copy tflite_runtime wheel and install
 COPY prebuilt/tflite_runtime-2.16.1-cp311-cp311-linux_aarch64.whl /tmp/

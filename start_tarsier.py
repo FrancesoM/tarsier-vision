@@ -175,7 +175,7 @@ def high_res_capture_thread():
         f"rtspsrc location=rtsp://admin:{pwd}@10.10.1.108:554/cam/realmonitor?channel=1&subtype=0 latency=100 protocols=tcp !"
         "rtpjitterbuffer ! "
         "rtph265depay ! "
-        "h265parse ! appsink name=sink drop=1"
+        "h265parse ! appsink name=sink "
     )
 
     logging.info(f"Starting pipeline as {high_res_pipeline}")
@@ -230,6 +230,111 @@ def high_res_capture_thread():
             logging.info(f"Video saved, restarting detection thread.. ")
 
             done_queue.put(True)  # notify low-res thread to resume
+
+
+def high_res_capture_thread():
+    pwd = "gregoriosonia1!"
+    
+    # Create directory for segments if it doesn't exist
+    segments_dir = "/tmp/segments"
+    os.makedirs(segments_dir, exist_ok=True)
+    
+    # Pipeline with splitmuxsink to create circular buffer segments
+    # This continuously records 2-second segments and keeps last 5 segments (10s preroll)
+    circular_pipeline_str = (
+        f"rtspsrc location=rtsp://admin:{pwd}@10.10.1.108:554/cam/realmonitor?channel=1&subtype=0 "
+        f"latency=100 protocols=tcp ! "
+        f"rtpjitterbuffer ! rtph265depay ! h265parse ! "
+        f"splitmuxsink location={segments_dir}/segment_%05d.mkv "
+        f"max-size-time=2000000000 max-files=5"  # 2s segments, keep 5 files (10s total)
+    )
+    
+    logging.info(f"Starting circular buffer pipeline: {circular_pipeline_str}")
+    
+    # Start the circular recording pipeline
+    circular_pipeline = Gst.parse_launch(circular_pipeline_str)
+    circular_pipeline.set_state(Gst.State.PLAYING)
+    
+    # Give pipeline time to start
+    time.sleep(2)
+    
+    while True:
+        # Wait for trigger
+        if not trigger_queue.empty():
+            trigger_queue.get()  # consume trigger
+            
+            logging.info("Recording triggered - collecting pre-roll + recording future")
+            
+            filename = datetime.now().strftime("event_%Y-%m-%d_%H-%M-%S") + ".mkv"
+            
+            # Get list of current segment files (pre-roll)
+            import glob
+            segment_files = sorted(glob.glob(f"{segments_dir}/segment_*.mkv"))
+            logging.info(f"Found {len(segment_files)} pre-roll segments")
+            
+            # Pause the circular recording to prevent file changes during copy
+            circular_pipeline.set_state(Gst.State.PAUSED)
+            time.sleep(0.5)  # Give it time to pause
+            
+            # Copy existing segments to temporary location
+            temp_segments = []
+            for i, seg_file in enumerate(segment_files):
+                temp_file = f"/tmp/preroll_{i:03d}.mkv"
+                os.system(f"cp '{seg_file}' '{temp_file}'")
+                temp_segments.append(temp_file)
+            
+            # Resume circular recording
+            circular_pipeline.set_state(Gst.State.PLAYING)
+            
+            # Record additional 60 seconds of future content
+            future_file = f"/tmp/future_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mkv"
+            future_pipeline_str = (
+                f"rtspsrc location=rtsp://admin:{pwd}@10.10.1.108:554/cam/realmonitor?channel=1&subtype=0 "
+                f"latency=100 protocols=tcp ! "
+                f"rtpjitterbuffer ! rtph265depay ! h265parse ! "
+                f"matroskamux ! filesink location={future_file}"
+            )
+            
+            logging.info("Recording future content...")
+            future_pipeline = Gst.parse_launch(future_pipeline_str)
+            future_pipeline.set_state(Gst.State.PLAYING)
+            
+            # Record for 60 seconds
+            time.sleep(60)
+            
+            # Stop future recording
+            future_pipeline.set_state(Gst.State.NULL)
+            
+            # Concatenate all files: preroll segments + future recording
+            all_files = temp_segments + [future_file]
+            concat_list = "|".join(all_files)
+            
+            filename=datetime.now().strftime("event_%Y-%m-%d_%H-%M-%S") + ".mkv"
+            logging.info(f"Concatenating {len(all_files)} files into {filename}")
+            
+            # Use ffmpeg to concatenate (more reliable than GStreamer for this)
+            file_list = "/tmp/concat_list.txt"
+            with open(file_list, "w") as f:
+                for file_path in all_files:
+                    f.write(f"file '{file_path}'\n")
+            
+            os.system(f"ffmpeg -f concat -safe 0 -i {file_list} -c copy {filename}")
+            
+            # Cleanup temporary files
+            for temp_file in temp_segments + [future_file]:
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+            try:
+                os.remove(file_list)
+            except:
+                pass
+            
+            logging.info(f"Recording completed: {filename}")
+            done_queue.put(True)  # notify low-res thread to resume
+        
+        time.sleep(0.1)
 
 
 # ----------------------------

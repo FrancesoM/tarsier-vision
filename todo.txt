@@ -1,0 +1,20 @@
+Poor's man Jira
+
++++ Bugs:
+    [ ] Keep rolling buffer (max 10 segments)
+        - When specifying max_segments in the pipeline, it seems to just stop saving them after 10 instead of rolling window 
+    [ ] The stitching logic doesn't work probably mkv headers are not aligned
+    [ ] Avoid double detection while it's technically still 
+    [ ] There is no gitignore   
+
+
+++  Must have:
+    [ ] Double check why first sent video is high quality, the next ones are lower
+    [ ] Script should be launchable as cron job
+    [ ] Send text message with video, timestamp at which the person is detected
+    [ ] Script docker run command
+
++   Nice to have 
+    [ ] Run inference over whole video and draw boxes
+    [ ] Use H.264 coded instead of H.265 which telegram should support already without .mp4 coversion
+    
