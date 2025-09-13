@@ -131,7 +131,7 @@ tpu_lock = Lock()
 def run_tpu_inference(input_data):
     with tpu_lock:
 
-        logging.info(f"Acquired TPU lock, running inference!")
+        logging.debug(f"Acquired TPU lock, running inference!")
         # perform inference
         interpreter.set_tensor(input_details[0]['index'], input_data)
         interpreter.invoke()
@@ -191,7 +191,10 @@ def stitch_segments(segments_dir, output_dir):
         logging.error(f"ffmpeg failed: {e.stderr.decode()}")
         return None
 
-    # Cleanup
+    # Cleanup of the segments
+    for seg in segments:
+        seg.unlink()
+
     logging.info(f"Final stitched file ready: {output_file}")
     return output_file
 

@@ -15,6 +15,12 @@ Poor's man Jira
     [ ] Double check why first sent video is high quality, the next ones are lower
         - This is still somehow happening, some videos are sent with slightly less w*h size
     [ ] Script should be launchable as cron job
+        - Cron job should also be the entire container that should run not as interactive but just as a containered app
+    [ ] Start/Stop gated by reading a GPIO (missing hardware at the moment)
+    [ ] Gracefull pause/shutdown
+    [x] Remove some prints especially when acquiring TPU mutex
+        - This I/O takes more than the actual TPU processing
+        - DONE: just changed the log level to debug 
     [x] Send text message with video, timestamp at which the person is detected
     [x] Script docker run command
 
