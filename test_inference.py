@@ -113,6 +113,14 @@ for image_path in image_files:
 
         print(f"Detected {num} objects")
 
+        classes_and_scores = list(zip(classes,labels_lookup,scores))
+        classes_and_scores.sort(key=lambda x:x[2]) # Sort by scores
+
+        # Print 10 highest scores
+        for el in classes_and_scores[-10:]:
+            print(f"{el[0]}:{el[1]} -> {el[2]:.2f}")
+
+
         # Draw detections on original image (not resized one)
         draw = ImageDraw.Draw(img)
         font = ImageFont.load_default()

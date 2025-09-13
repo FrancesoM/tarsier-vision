@@ -13,6 +13,8 @@ Behavior:
 """
 
 import os
+import pathlib
+from pathlib import Path
 import sys
 import time
 import logging
@@ -49,18 +51,20 @@ RTSP_PORT = 554
 RTSP_PATH = "/cam/realmonitor?channel=1&subtype={}"
 
 # Directories
-RAM_DIR = "/dev/shm/highres_segments"    # RAM-backed directory
-EVENTS_DIR = "/workspace/events"         # where final copies are stored
-os.makedirs(RAM_DIR, exist_ok=True)
-os.makedirs(EVENTS_DIR, exist_ok=True)
+RAM_DIR    = Path("/dev/shm/highres_segments")    # RAM-backed directory
+EVENTS_DIR = Path("/workspace/events")           # where final copies are stored
+RAM_DIR.mkdir(parents=True, exist_ok=True)
+EVENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Remove old segments when this script is re-run
-[os.remove(os.path.join(RAM_DIR, f)) for f in os.listdir(RAM_DIR)]
+for f in RAM_DIR.iterdir():
+    if f.is_file():
+        f.unlink()
 
 # Segment / buffering parameters
-SEGMENT_TIME_SECS = 10                   # each MKV segment length
-PRE_BUFFER_SECS = 120                    # total rolling buffer to keep (2 minutes)
-POST_BUFFER_SECS = 60                    # after trigger, wait this much to copy future
+SEGMENT_TIME_SECS = 10                         # each MKV segment length
+PRE_BUFFER_SECS = 120                          # total rolling buffer to keep (2 minutes)
+POST_BUFFER_SECS = 60                          # after trigger, wait this much to copy future
 MAX_SEGMENTS = max(1, PRE_BUFFER_SECS // SEGMENT_TIME_SECS)
 
 # Low-res pipeline (for motion detection / TPU)
@@ -79,7 +83,7 @@ HIGH_RES_RTSP = f"rtsp://{RTSP_USER}:{RTSP_PWD}@{RTSP_HOST}:{RTSP_PORT}{RTSP_PAT
 HIGH_RES_PIPELINE = (
     f'rtspsrc location="{HIGH_RES_RTSP}" latency=100 protocols=tcp ! '
     f'rtpjitterbuffer ! rtph265depay ! h265parse ! '
-    f'splitmuxsink location={RAM_DIR}/segment_%06d.mkv max-size-time={SEGMENT_TIME_SECS * 1_000_000_000} max-files={MAX_SEGMENTS}'
+    f'splitmuxsink location={RAM_DIR}/segment_%06d.mkv max-size-time={SEGMENT_TIME_SECS * 1_000_000_000}'
 )
 
 # Event queue for post-processing (stitch/send)
@@ -150,21 +154,21 @@ def stitch_segments(segments_dir, output_dir):
     """
     # Collect and sort segments by name (splitmuxsink produces numbered parts)
     segments = sorted(
-        [f for f in os.listdir(segments_dir) if f.endswith(".mkv")]
+        [f for f in segments_dir.iterdir() if f.suffix == ".mkv"]
     )
     if not segments:
         logging.error("No MKV segments found to stitch.")
         return None
 
     # Create a temporary file list for ffmpeg
-    filelist_path = os.path.join(segments_dir, "segments.txt")
+    filelist_path = segments_dir / "segments.txt"
     with open(filelist_path, "w") as f:
         for seg in segments:
-            f.write(f"file '{os.path.join(segments_dir, seg)}'\n")
+            f.write(f"file '{seg.as_posix()}'\n")
 
     # Output file path
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    output_file = os.path.join(output_dir, f"event_{ts}.mp4")
+    output_file = output_dir / f"event_{ts}.mp4"
 
     # Run ffmpeg (stream copy, with re-encoding)
     cmd = [
@@ -172,12 +176,12 @@ def stitch_segments(segments_dir, output_dir):
         "-y",
         "-f", "concat",
         "-safe", "0",
-        "-i", filelist_path,
+        "-i", filelist_path.as_posix(),
         "-c:v", "libx264",      # re-encode video to H.264
         "-c:a", "aac",          # re-encode audio to AAC
         "-preset", "fast",      # optional, speeds up encoding
         "-movflags", "+faststart",  # ensures MP4 is streamable
-        output_file            # final output file
+        output_file.as_posix()             # final output file
     ]
 
     logging.info(f"Stitching {len(segments)} segments into {output_file} with command {cmd}")
@@ -195,9 +199,8 @@ def stitch_segments(segments_dir, output_dir):
 def copy_segments_to_event(ram_dir, events_dir, timestamp_str):
     """Copy latest max_segments from ram_dir into a new event folder and return path."""
     
-    event_folder = os.path.join(events_dir, f"event_{timestamp_str}")
-    os.makedirs(event_folder, exist_ok=True)
-
+    event_folder = events_dir / f"event_{timestamp_str}"
+    event_folder.mkdir(parents=True, exist_ok=True)
     shutil.copytree(ram_dir, event_folder, dirs_exist_ok=True)
 
     return event_folder
@@ -224,7 +227,7 @@ def send_video(video_path):
         logging.info(f"Sent to {CHAT_ID}: {r.status_code} {r.text}")
 
 def check_for_person(video_path):
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(video_path.as_posix())
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_interval = int(fps // 5) if fps > 5 else 1  # sample ~5fps
 
@@ -245,18 +248,32 @@ def check_for_person(video_path):
             in_shape = input_details[0]['shape']
             img_resized = img.resize((in_shape[2], in_shape[1]))
             input_data = np.expand_dims(np.array(img_resized, dtype=np.uint8), axis=0)
-
+        
             boxes,classes,scores,num = run_tpu_inference(input_data)
+
+            ############ DEBUG: Log what was found, for debugging ##############################################
+            #classes_and_scores = [{"class":c , "score":s } for c,s in zip(classes,scores)]
+
+            #classes_and_scores.sort(key=lambda x:x["score"]) # Sort by scores and print highest 10
+
+            #for item in classes_and_scores[-5:]:
+            #    logging.debug(f"{item["class"]}:{labels_lookup[int(item["class"])]} -> {item["score"]:.2f}")
+            ####################################################################################################
 
             draw = ImageDraw.Draw(img)
             font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size=32)
 
-            person_score = scores[person_idx]
-            person_found = person_score>0.25 
+            person_found        = False
+            person_object_index = None 
+            for i in range(num):
+                if (int(classes[i]) == person_idx) and (scores[i] > 0.25):
+                    person_found        = True
+                    person_object_index = i
 
+                    logging.info(f"Person found at frame {frame_idx} with score {scores[i]}")
 
             if person_found:
-                ymin, xmin, ymax, xmax = boxes[person_idx]
+                ymin, xmin, ymax, xmax = boxes[person_object_index]
                 (left, right, top, bottom) = (
                     xmin * img.width,
                     xmax * img.width,
@@ -264,12 +281,15 @@ def check_for_person(video_path):
                     ymax * img.height,
                 )
 
-                label = f"person {scores[person_idx]:.2f}"
+                text_label = f"person {scores[person_object_index]:.2f}"
                 draw.rectangle([left, top, right, bottom], outline="red", width=3)
-                draw.text((left, top - 10), label, fill="red", font=font)
-            
-                detected_frame_path = "/tmp/first_person_frame.jpg"
+                draw.text((left, top - 10), text_label, fill="red", font=font)
+                
+                video_folder_path = video_path.parent
+                image_name        = video_path.stem + "_first.jpg"
+                detected_frame_path = video_folder_path / image_name
                 img.save(detected_frame_path)
+
                 person_timestamp = frame_idx/fps
                 break
 
@@ -297,6 +317,8 @@ def low_res_detection_and_capture_loop(pwd):
     # small 2-frame deque logic to avoid false positives
     frame_q = deque(maxlen=2)
 
+    time_start = time.perf_counter() # Time in seconds
+
     try:
         while True:
             ret, frame = cap.read()
@@ -316,7 +338,7 @@ def low_res_detection_and_capture_loop(pwd):
             thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
             motion_area = cv2.countNonZero(thresh)
 
-            if motion_area > 200:   # tune threshold
+            if motion_area > 200:    # tune threshold
                 # small debounce: clear deque so we don't trigger repeatedly
                 frame_q.clear()
 
@@ -327,11 +349,13 @@ def low_res_detection_and_capture_loop(pwd):
 
                 boxes,classes,scores,num = run_tpu_inference(input_data)
 
-                person_score = scores[person_idx]
+                person_found        = False
+                for i in range(num):
+                    if (int(classes[i]) == person_idx) and (scores[i] > 0.25):
+                        person_found        = True
+                        logging.info(f"Person was in frame with confidence {scores[i]}")
 
-                logging.info(f"Person was in frame with confidence {person_score}")
-
-                if person_score > 0.25:
+                if person_found:
 
                     # Person detected -> capture event
                     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -352,6 +376,27 @@ def low_res_detection_and_capture_loop(pwd):
 
             # small sleep to yield — low-res pipeline already runs at 10fps via pipeline
             time.sleep(0.005)
+
+            # Do cleanup: keep only the last 2minutes. 
+            # There is a new segment every 10 seconds so no real need to check each loop iteration
+            # Float comparison is fine, no need to fine grained precision
+            if (time.perf_counter() - time_start ) > 10.0: 
+
+                time_start = time.perf_counter()
+                files = [f for f in RAM_DIR.iterdir() if f.is_file()]
+
+                if len(files) > MAX_SEGMENTS:
+                    # Sort by modification time, newest last
+                    files.sort(key=os.path.getmtime)
+
+                    # Delete oldest, keep newest max_segments
+                    for f in files[:-MAX_SEGMENTS]:
+                        try:
+                            f.unlink()
+                        except OSError as e:
+                            logging.info(f"[prune] Failed to remove {f}: {e}")
+
+
     finally:
         cap.release()
 
@@ -371,9 +416,9 @@ def stitch_worker_thread():
         # Double check that a person is detected
         frame_with_person,person_timestamp = check_for_person(video_path)
         if frame_with_person != None:
-            send_text(f"Found a person at {person_timestamp}s")
-            send_photo(frame_with_person)
-            send_video(video_path)
+            send_text(f"Found a person at {person_timestamp}s - {frame_with_person.as_posix()} - {video_path.as_posix()}")
+            send_photo(frame_with_person.as_posix())
+            send_video(video_path.as_posix())
 
         # For now just sleep to simulate work:
         time.sleep(2)
@@ -383,6 +428,7 @@ def stitch_worker_thread():
 # ----------------- Main -----------------
 def main():
     logging.info("Program start")
+
 
     # Start stitch/send worker thread (will process completed event folders)
     stitch_thread = threading.Thread(target=stitch_worker_thread, name="StitchWorker", daemon=True)

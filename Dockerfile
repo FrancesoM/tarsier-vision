@@ -48,8 +48,13 @@ RUN curl -L -o /models/efficientdet_lite0_320_ptq_edgetpu.tflite \
        https://raw.githubusercontent.com/google-coral/test_data/master/efficientdet_lite0_320_ptq_edgetpu.tflite && \
     curl -L -o /models/efficientdet_lite0_320_ptq.tflite \
        https://raw.githubusercontent.com/google-coral/test_data/master/efficientdet_lite0_320_ptq.tflite && \
+    curl -L -o /models/efficientdet_lite3_512_ptq_edgetpu.tflite \
+       https://raw.githubusercontent.com/google-coral/test_data/master/efficientdet_lite3_512_ptq_edgetpu.tflite && \
+    curl -L -o /models/efficientdet_lite3_512_ptq.tflite \
+       https://raw.githubusercontent.com/google-coral/test_data/master/efficientdet_lite3_512_ptq.tflite && \
     curl -L -o /models/coco_labels.txt \
-       https://raw.githubusercontent.com/google-coral/test_data/master/coco_labels.txt
+       https://raw.githubusercontent.com/google-coral/test_data/master/coco_labels.txt 
+
 
 RUN echo "source /opt/venv/bin/activate" >> /root/.bashrc
 
