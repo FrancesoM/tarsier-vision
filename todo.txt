@@ -16,9 +16,13 @@ Poor's man Jira
         - This is still somehow happening, some videos are sent with slightly less w*h size
     [ ] Script should be launchable as cron job
         - Cron job should also be the entire container that should run not as interactive but just as a containered app
-    [ ] Start/Stop gated by reading a GPIO (missing hardware at the moment)
+    [n] Start/Stop gated by reading a GPIO (missing hardware at the moment)
+        - Won't do, we use telegram buttons. 
+    [ ] Start stop based on telegram commands, therefore implement parsing and polling on tarsier-job side
+    [ ] Send only image, send video only on request through telegram command. 
+        - Have some sort of ID to retrieve a particular video. 
     [ ] Gracefull pause/shutdown
-    [x] Remove some prints especially when acquiring TPU mutex
+    [x] Remove some prints especially when acquiring TPU mutex
         - This I/O takes more than the actual TPU processing
         - DONE: just changed the log level to debug 
     [x] Send text message with video, timestamp at which the person is detected

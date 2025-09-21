@@ -24,9 +24,10 @@ import subprocess
 from datetime import datetime
 from collections import deque
 from queue import Queue
-from urllib.parse import quote
-import requests
 from threading import Lock
+import hashlib
+import wordlist_id
+import communication_utils as comm
 
 import gi
 gi.require_version('Gst', '1.0')
@@ -87,7 +88,44 @@ HIGH_RES_PIPELINE = (
 )
 
 # Event queue for post-processing (stitch/send)
-event_queue = Queue()
+event_queue   = Queue()
+
+# TODO: when checking the command, we should tie the handler to this string else
+# we re-write the string twiece and we have to change it twice
+ALLOWED_COMMANDS = ["/video","/up","/down"]
+command_queue = Queue()
+
+# Stop/Start logic 
+class PipeStates:
+    RUNNING = 0
+    STOPPED = 1
+
+# Helper functions to start/stop the GST streamer pipelines
+def start_low_res():
+    logging.info(f"Opening low-res pipeline: {LOW_RES_PIPELINE}")
+    cap = cv2.VideoCapture(LOW_RES_PIPELINE, cv2.CAP_GSTREAMER)
+    if not cap.isOpened():
+        logging.error("Failed to open low-res pipeline")
+        return None
+    return cap
+
+def stop_low_res(cap):
+    if cap:
+        cap.release()
+        logging.info("Low-res pipeline stopped")
+
+def start_high_res():
+    logging.info(f"Starting high pipeline as {HIGH_RES_PIPELINE}")
+    hr_pipe_obj = Gst.parse_launch(HIGH_RES_PIPELINE)
+    hr_pipe_obj.set_state(Gst.State.PLAYING)
+    return hr_pipe_obj
+
+def stop_high_res(hr_pipe_obj):
+    if hr_pipe_obj:
+        hr_pipe_obj.set_state(Gst.State.NULL)
+        logging.info("High-res pipeline stopped")
+
+
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='[%(asctime)s] [%(threadName)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
@@ -144,7 +182,15 @@ def run_tpu_inference(input_data):
 
         return boxes,classes,scores,num
 
+def append_random_word(original_name: str) -> str:
+    # Compute a stable integer hash
+    digest = hashlib.sha256(original_name.encode()).digest()
+    number = int.from_bytes(digest, "big")
 
+    # Pick a word deterministically
+    word = WORDLIST[number % len(WORDLIST)]
+
+    return f"{original_name}_{word}"
 
 def stitch_segments(segments_dir, output_dir):
     """
@@ -167,8 +213,13 @@ def stitch_segments(segments_dir, output_dir):
             f.write(f"file '{seg.as_posix()}'\n")
 
     # Output file path
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    output_file = output_dir / f"event_{ts}.mp4"
+    ts = datetime.now().strftime("%Y-%m-%d_at_%H-%M-%S")
+
+    # Append random word to the video for easy retrieval
+    video_name = append_random_word(f"event_{ts}")
+    video_name += ".mp4"
+
+    output_file = output_dir / video_name
 
     # Run ffmpeg (stream copy, with re-encoding)
     cmd = [
@@ -207,27 +258,6 @@ def copy_segments_to_event(ram_dir, events_dir, timestamp_str):
     shutil.copytree(ram_dir, event_folder, dirs_exist_ok=True)
 
     return event_folder
-
-TG_TOKEN = os.getenv("TG_TOKEN")  # token from env
-CHAT_ID = os.getenv("CHAT_ID", "").split(",")  # allow multiple IDs, comma separated
-
-def send_text(text):
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-    
-    r = requests.post(url, data={"chat_id": CHAT_ID,"text": text})
-    logging.info(f"Sent to {CHAT_ID}: {r.status_code} {r.text}")
-
-def send_photo(image_path, caption=""):
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
-    with open(image_path, "rb") as photo:
-        r = requests.post(url, data={"chat_id": CHAT_ID, "caption": caption}, files={"photo": photo})
-        logging.info(f"Sent frame to {CHAT_ID}: {r.status_code}")
-
-def send_video(video_path):
-    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo"
-    with open(video_path, "rb") as video:
-        r = requests.post(url, data={"chat_id": CHAT_ID}, files={"video": video})
-        logging.info(f"Sent to {CHAT_ID}: {r.status_code} {r.text}")
 
 def check_for_person(video_path):
     cap = cv2.VideoCapture(video_path.as_posix())
@@ -302,113 +332,136 @@ def check_for_person(video_path):
     return detected_frame_path,person_timestamp
 
 
-def low_res_detection_and_capture_loop(pwd):
+def low_res_detection_and_capture():
 
-    # Open low-res capture
-    logging.info(f"Opening low-res pipeline: {LOW_RES_PIPELINE}")
-    cap = cv2.VideoCapture(LOW_RES_PIPELINE, cv2.CAP_GSTREAMER)
-    if not cap.isOpened():
-        logging.error("Failed to open low-res pipeline")
-        return
-
-    logging.info(f"Starting high pipeline as {HIGH_RES_PIPELINE}")
-
-    hr_pipe_obj = Gst.parse_launch(HIGH_RES_PIPELINE)
-    hr_pipe_obj.set_state(Gst.State.PLAYING)
 
 
     # small 2-frame deque logic to avoid false positives
     frame_q = deque(maxlen=2)
 
-    time_start = time.perf_counter() # Time in seconds
+    curr_state = PipeStates.STOPPED
+    next_state = PipeStates.STOPPED
 
     try:
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                time.sleep(0.02)
-                continue
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.GaussianBlur(gray, (21, 21), 0)
-            frame_q.append(gray)
+            # This queue can't block, it affects the program flow only if it has a new element inside
+            # which means someone wants to change the state. 
+            try:
+                next_state = state_queue.get(False)  
+            except Queue.Empty:
+                next_state = curr_state
 
-            if len(frame_q) < 2:
-                continue
+            if curr_state == PipeStates.STOPPED and next_state == PipeStates.RUNNING:
+                # Here we start the pipelines
 
-            prev_frame, curr_frame = frame_q[0], frame_q[1]
-            delta = cv2.absdiff(prev_frame, curr_frame)
-            thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
-            motion_area = cv2.countNonZero(thresh)
+                cap = start_low_res()
+                hig = start_high_res()
 
-            if motion_area > 200:    # tune threshold
-                # small debounce: clear deque so we don't trigger repeatedly
-                frame_q.clear()
+                time_start = time.perf_counter() # Time in second
 
-                logging.info(f"Detected motion!")
+            if curr_state == PipeStates.RUNNING and next_state == PipeStates.STOPPED:
 
-                # frame is already the right dimension, let's just convert to 8bits
-                input_data = np.expand_dims(np.array(frame, dtype=np.uint8), axis=0)
+                stop_low_res(cap)
+                stop_high_res(hig)
 
-                boxes,classes,scores,num = run_tpu_inference(input_data)
+                cap = None
+                hig = None
 
-                person_found        = False
-                for i in range(num):
-                    if (int(classes[i]) == person_idx) and (scores[i] > 0.25):
-                        person_found        = True
-                        logging.info(f"Person was in frame with confidence {scores[i]}")
+                # Here we also remove the files from the temp storage in RAM because 
+                # next time we start they will be outdate. 
+                files = [f for f in RAM_DIR.iterdir() if f.is_file()]
+                for f in files: 
+                    f.unlink()
 
-                if person_found:
+            curr_state = next_state
 
-                    # Person detected -> capture event
-                    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                    logging.info(f"Person detected at {ts} — will wait {POST_BUFFER_SECS}s to capture post-buffer")
+            if curr_state == PipeStates.RUNNIG:
 
-                    # wait for the post-buffer duration (during this time splitmuxsink keeps writing new segments)
-                    time.sleep(POST_BUFFER_SECS)
+                # cap, hig objects only exists when the state is running
 
-                    # Copy those latest segments to event folder
-                    event_folder = copy_segments_to_event(RAM_DIR, EVENTS_DIR, ts)
+                ret, frame = cap.read()
+                if not ret:
+                    time.sleep(0.02)
+                    continue
 
-                    # notify stitch/send thread with the event folder path
-                    event_queue.put(event_folder)
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                gray = cv2.GaussianBlur(gray, (21, 21), 0)
+                frame_q.append(gray)
 
-                    logging.info(f"Event folder queued for post-processing: {event_folder}")
+                if len(frame_q) < 2:
+                    continue
 
+                prev_frame, curr_frame = frame_q[0], frame_q[1]
+                delta = cv2.absdiff(prev_frame, curr_frame)
+                thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
+                motion_area = cv2.countNonZero(thresh)
+
+                if motion_area > 200:    # tune threshold
+                    # small debounce: clear deque so we don't trigger repeatedly
                     frame_q.clear()
 
-            # small sleep to yield — low-res pipeline already runs at 10fps via pipeline
-            time.sleep(0.005)
+                    logging.info(f"Detected motion!")
 
-            # Do cleanup: keep only the last 2minutes. 
-            # There is a new segment every 10 seconds so no real need to check each loop iteration
-            # Float comparison is fine, no need to fine grained precision
-            if (time.perf_counter() - time_start ) > 10.0: 
+                    # frame is already the right dimension, let's just convert to 8bits
+                    input_data = np.expand_dims(np.array(frame, dtype=np.uint8), axis=0)
 
-                time_start = time.perf_counter()
-                files = [f for f in RAM_DIR.iterdir() if f.is_file()]
+                    boxes,classes,scores,num = run_tpu_inference(input_data)
 
-                if len(files) > MAX_SEGMENTS:
-                    # Sort by modification time, newest last
-                    files.sort(key=os.path.getmtime)
+                    person_found        = False
+                    for i in range(num):
+                        if (int(classes[i]) == person_idx) and (scores[i] > 0.25):
+                            person_found        = True
+                            logging.info(f"Person was in frame with confidence {scores[i]}")
 
-                    # Delete oldest, keep newest max_segments
-                    for f in files[:-MAX_SEGMENTS]:
-                        try:
-                            f.unlink()
-                        except OSError as e:
-                            logging.info(f"[prune] Failed to remove {f}: {e}")
+                    if person_found:
 
+                        # Person detected -> capture event
+                        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        logging.info(f"Person detected at {ts} — will wait {POST_BUFFER_SECS}s to capture post-buffer")
 
-    finally:
-        cap.release()
+                        # wait for the post-buffer duration (during this time splitmuxsink keeps writing new segments)
+                        time.sleep(POST_BUFFER_SECS)
+
+                        # Copy those latest segments to event folder
+                        event_folder = copy_segments_to_event(RAM_DIR, EVENTS_DIR, ts)
+
+                        # notify stitch/send thread with the event folder path
+                        event_queue.put(event_folder)
+
+                        logging.info(f"Event folder queued for post-processing: {event_folder}")
+
+                        frame_q.clear()
+
+                # small sleep to yield — low-res pipeline already runs at 10fps via pipeline
+                time.sleep(0.005)
+
+                # Do cleanup: keep only the last 2minutes. 
+                # There is a new segment every 10 seconds so no real need to check each loop iteration
+                # Float comparison is fine, no need to fine grained precision
+                if (time.perf_counter() - time_start ) > 10.0: 
+
+                    time_start = time.perf_counter()
+                    files = [f for f in RAM_DIR.iterdir() if f.is_file()]
+
+                    if len(files) > MAX_SEGMENTS:
+                        # Sort by modification time, newest last
+                        files.sort(key=os.path.getmtime)
+
+                        # Delete oldest, keep newest max_segments
+                        for f in files[:-MAX_SEGMENTS]:
+                            try:
+                                f.unlink()
+                            except OSError as e:
+                                logging.info(f"[prune] Failed to remove {f}: {e}")
+
 
 def stitch_worker_thread():
     """
     Placeholder worker that receives event_folder paths and will stitch/send later.
     For now, it just logs the event folder; you can implement the stitch + Telegram upload logic here.
     """
-    send_text("Starting recording")
+    comm.send_text("Starting recording")
     while True:
         folder = event_queue.get()
         logging.info(f"Stitch worker got event folder: {folder}")
@@ -419,14 +472,73 @@ def stitch_worker_thread():
         # Double check that a person is detected
         frame_with_person,person_timestamp = check_for_person(video_path)
         if frame_with_person != None:
-            send_text(f"Found a person at {person_timestamp}s - {frame_with_person.as_posix()} - {video_path.as_posix()}")
-            send_photo(frame_with_person.as_posix())
-            send_video(video_path.as_posix())
+            comm.send_photo(frame_with_person.as_posix(),caption=f"Found a person at {person_timestamp}s")
+            
+            # Don't send the video everytime, rather than this, allow for retrieval with a command
+            #send_video(video_path.as_posix())
 
         # For now just sleep to simulate work:
         time.sleep(2)
         logging.info(f"Stitch/send placeholder finished for {folder}")
 
+
+def find_event_video(query: str = "") -> Optional[Path]:
+    """
+    Find the video file inside an event folder.
+
+    - If query is empty: return the .mp4 in the most recent folder.
+    - If query is not empty: return the .mp4 in the folder whose name contains query.
+    - If nothing matches: return None.
+    """
+
+    # Collect only directories
+    folders = [f for f in EVENTS_DIR.iterdir() if f.is_dir()]
+    if not folders:
+        logging.info(f"Can't find any folders in {EVENTS_DIR.as_posix()}")
+        return None
+
+    if query:
+        # Filter by substring match
+        matches = [f for f in folders if query in f.name]
+        if not matches:
+            logging.info(f"Can't find any match for {query} in {folders}")
+            return None
+        folder = matches[0]   # take first match
+    else:
+        # Pick the most recently modified folder
+        folder = max(folders, key=lambda f: f.stat().st_mtime)
+
+    # Find .mp4 inside the chosen folder
+    mp4_files = list(folder.glob("*.mp4"))
+    if len(mp4_files) != 1:
+        logging.info(f"Can't find any mp4 file in {folder.as_posix()}")
+        return None
+
+    return mp4_files[0]
+
+# Right now we support only one request: a /video command. 
+# - no payload      -> send most recent video 
+# - payload <sring> -> search video corresponding to string and sends that
+def process_commands():
+    while True:
+        rcv = command_queue.get()
+
+        if rcv["command"] == "/up": 
+            state_queue.put(PipeStates.RUNNING)
+            comm.send_text("Avvio la registrazione")
+
+        if rcv["command"] == "/down": 
+            state_queue.put(PipeStates.STOPPED)
+            comm.send_text("Fermo la registrazione")
+
+        if rcv["command"] == "/video":
+            # TODO
+            video_id = rcv["payload"]
+
+            if find_event_video(video_id) != None:
+                comm.send_video(video_path)
+            else:
+                comm.send_text("Non ho trovato il video richiesto")
 
 # ----------------- Main -----------------
 def main():
@@ -437,8 +549,19 @@ def main():
     stitch_thread = threading.Thread(target=stitch_worker_thread, name="StitchWorker", daemon=True)
     stitch_thread.start()
 
+    # Abstract way to just receive commands, which are placed in the command queue. comm module implements backend details. 
+    # In this case it's doing long polling on telegram server and filtering on chat and user ids
+    polling_thread = threading.Thread(target=comm.wait_commands, args=(command_queue,ALLOWED_COMMANDS,), name="PollingWorker", daemon=True)
+    polling_thread.start()
+
+    # Since this logic is specific to this application, the command thread can only gives us a command and its payload
+    # it's up to us what we do. 
+    process_commands_thread = threading.Thread(target=process_commands, name="ProcessWorker", daemon=True)
+    process_commands_thread.start()
+
     # Run low-res detection + capture loop in main thread (or start as its own thread if you prefer)
-    low_res_detection_and_capture_loop(RTSP_PWD)
+    low_res_detection_and_capture_thread = threading.Thread(target=low_res_detection_and_capture, name="PipelinesWorker", daemon=True)
+    low_res_detection_and_capture_thread.start()
 
 
 if __name__ == "__main__":
