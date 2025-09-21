@@ -569,5 +569,10 @@ def main():
     low_res_detection_and_capture_thread.start()
 
 
+    stitch_thread.join()
+    polling_thread.join()
+    process_commands_thread.join()
+    low_res_detection_and_capture_thread.join()
+
 if __name__ == "__main__":
     main()
