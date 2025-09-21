@@ -28,6 +28,7 @@ from threading import Lock
 import hashlib
 import wordlist_id
 import communication_utils as comm
+import random
 
 import gi
 gi.require_version('Gst', '1.0')
@@ -302,7 +303,7 @@ def check_for_person(video_path):
             person_found        = False
             person_object_index = None 
             for i in range(num):
-                if (int(classes[i]) == person_idx) and (scores[i] > 0.25):
+                if (int(classes[i]) == person_idx) and (scores[i] > 0.00001):
                     person_found        = True
                     person_object_index = i
 
@@ -404,7 +405,7 @@ def low_res_detection_and_capture():
                 thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
                 motion_area = cv2.countNonZero(thresh)
 
-                if motion_area > 200:    # tune threshold
+                if motion_area > 200 or (random.randint(0,100) % 20 == 0): # 5% of random triggering
                     # small debounce: clear deque so we don't trigger repeatedly
                     frame_q.clear()
 
@@ -417,7 +418,8 @@ def low_res_detection_and_capture():
 
                     person_found        = False
                     for i in range(num):
-                        if (int(classes[i]) == person_idx) and (scores[i] > 0.25):
+                        # Basically always find a person
+                        if (int(classes[i]) == person_idx) and (scores[i] > 0.00001):
                             person_found        = True
                             logging.info(f"Person was in frame with confidence {scores[i]}")
 
@@ -535,7 +537,6 @@ def process_commands():
         
         logging.info(f"Received command {rcv}")
         if rcv["command"] == "/up": 
-            logging.info("putting running state into queue")
             state_queue.put(PipeStates.RUNNING)
 
         if rcv["command"] == "/down": 
