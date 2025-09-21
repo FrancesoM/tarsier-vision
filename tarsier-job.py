@@ -23,7 +23,7 @@ import threading
 import subprocess
 from datetime import datetime
 from collections import deque
-from queue import Queue
+from queue import Queue,Empty
 from threading import Lock
 import hashlib
 import wordlist_id
@@ -263,9 +263,10 @@ def copy_segments_to_event(ram_dir, events_dir, timestamp_str):
 
 def check_for_person(video_path):
     cap = cv2.VideoCapture(video_path.as_posix())
+    
     fps = cap.get(cv2.CAP_PROP_FPS)
     frame_interval = int(fps // 5) if fps > 5 else 1  # sample ~5fps
-
+    
     frame_idx = 0
     detected_frame_path = None
     person_timestamp    = None
@@ -348,8 +349,8 @@ def low_res_detection_and_capture():
             # This queue can't block, it affects the program flow only if it has a new element inside
             # which means someone wants to change the state. 
             try:
-                next_state = state_queue.get(False)  
-            except Queue.Empty:
+                next_state = state_queue.get(block=False)
+            except Empty:
                 next_state = curr_state
 
             if curr_state == PipeStates.STOPPED and next_state == PipeStates.RUNNING:
@@ -359,7 +360,8 @@ def low_res_detection_and_capture():
                 hig = start_high_res()
 
                 time_start = time.perf_counter() # Time in second
-
+                
+                logging.info("Starting..")
                 comm.send_text("Avvio la telecamera!")
 
             if curr_state == PipeStates.RUNNING and next_state == PipeStates.STOPPED:
@@ -381,7 +383,7 @@ def low_res_detection_and_capture():
 
             curr_state = next_state
 
-            if curr_state == PipeStates.RUNNIG:
+            if curr_state == PipeStates.RUNNING:
 
                 # cap, hig objects only exists when the state is running
 
@@ -459,10 +461,15 @@ def low_res_detection_and_capture():
                                 f.unlink()
                             except OSError as e:
                                 logging.info(f"[prune] Failed to remove {f}: {e}")
+
+            else:
+                # This thread is just sleeping waiting for a change to RUNNING
+                time.sleep(1)
     
-    except:
-        # TODO: what to do here? maybe remove try block
-        pass
+    except Exception as e:
+        logging.error(f"An unexpected error occurred: {e}")
+        time.sleep(5) # Wait before retrying
+
 
 def stitch_worker_thread():
     while True:
@@ -525,8 +532,10 @@ def find_event_video(query: str = ""):
 def process_commands():
     while True:
         rcv = command_queue.get()
-
+        
+        logging.info(f"Received command {rcv}")
         if rcv["command"] == "/up": 
+            logging.info("putting running state into queue")
             state_queue.put(PipeStates.RUNNING)
 
         if rcv["command"] == "/down": 
@@ -540,6 +549,9 @@ def process_commands():
                 comm.send_video(video_path)
             else:
                 comm.send_text("Non ho trovato il video richiesto")
+    
+        # Don't spin too much on checking the queue. 
+        time.sleep(1)
 
 # ----------------- Main -----------------
 def main():

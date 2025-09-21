@@ -149,7 +149,7 @@ def wait_commands(queue, allowed_commands):
     logging.info(f"Debug will be sent to this id: {DEBUG_CHAT_ID}")
     
     # Get all the updates that were sent when the program was offline... and discard them automatically. 
-    updates = get_updates(offset=None,timeout=10)
+    updates = get_updates(offset=None,timeout=1)
 
     logging.info(f"Found {len(updates)} while bot was offline, discarding all of them.. ")
     
