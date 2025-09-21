@@ -60,6 +60,4 @@ RUN echo "source /opt/venv/bin/activate" >> /root/.bashrc
 
 # Default working directory
 WORKDIR /workspace 
-
-CMD ["/bin/bash"]
-
+CMD ["/opt/venv/bin/python", "tarsier-job.py"]

@@ -363,7 +363,13 @@ def low_res_detection_and_capture():
                 hig = start_high_res()
 
                 time_start = time.perf_counter() # Time in second
-                
+
+                # Here we also remove the files from the temp storage in RAM because 
+                # they might belong to the previous run.  
+                files = [f for f in RAM_DIR.iterdir() if f.is_file()]
+                for f in files: 
+                    f.unlink()
+
                 logging.info("Starting..")
                 comm.send_text("Avvio la telecamera!")
 
@@ -375,11 +381,6 @@ def low_res_detection_and_capture():
                 cap = None
                 hig = None
 
-                # Here we also remove the files from the temp storage in RAM because 
-                # next time we start they will be outdate. 
-                files = [f for f in RAM_DIR.iterdir() if f.is_file()]
-                for f in files: 
-                    f.unlink()
 
                 comm.send_text("Fermo la telecamera!")
 
