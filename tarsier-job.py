@@ -28,7 +28,6 @@ from threading import Lock
 import hashlib
 import wordlist_id
 import communication_utils as comm
-import random
 
 import gi
 gi.require_version('Gst', '1.0')
@@ -159,9 +158,8 @@ interpreter.allocate_tensors()
 labels_lookup = load_labels(labels)
 person_idx = 0
 for i in range(len(labels_lookup)):
-    if labels_lookup[i] == "car":
+    if labels_lookup[i] == "person":
         person_idx = i
-person_idx = 69
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
@@ -347,7 +345,6 @@ def low_res_detection_and_capture():
     curr_state = PipeStates.STOPPED
     next_state = PipeStates.STOPPED
 
-    force_motion=False
 
     try:
         while True:
@@ -410,10 +407,9 @@ def low_res_detection_and_capture():
                 thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
                 motion_area = cv2.countNonZero(thresh)
 
-                if motion_area > 200 or force_motion: # 5% of random triggering
+                if motion_area > 200:    # tune threshold
                     # small debounce: clear deque so we don't trigger repeatedly
                     frame_q.clear()
-                    force_motion = False
 
                     logging.info(f"Detected motion!")
 
