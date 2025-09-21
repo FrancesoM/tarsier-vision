@@ -82,12 +82,6 @@ DEBUG_CHAT_ID = os.getenv("DEBUG_CHAT_ID")
 # when the container image is deleted. 
 LAST_UPDATE_ID_PATH = Path(os.getenv("LAST_UPDATE_ID_PATH"))
 
-# Log some debug: 
-logger.info(f"Whitelisted chat ids: ", WL_CHAT_ID)
-logger.info(f"Whitelisted user ids: ", WL_USER_ID)
-logger.info(f"Messages will be sent to this id: ", SEND_CHAT_ID)
-logger.info(f"Debug will be sent to this id: ", DEBUG_CHAT_ID)
-
 def read_last_update_id() -> int:
     """Reads the last processed update ID from a file using pathlib."""
     try:
@@ -174,6 +168,12 @@ def get_updates(offset=None, timeout=600):
 
 # Starts a loop waiting for command, whenever a command arrives it places it in a queue
 def wait_commands(queue, allowed_commands):
+    
+    # Log some debug: 
+    logger.info(f"Whitelisted chat ids: ", WL_CHAT_ID)
+    logger.info(f"Whitelisted user ids: ", WL_USER_ID)
+    logger.info(f"Messages will be sent to this id: ", SEND_CHAT_ID)
+    logger.info(f"Debug will be sent to this id: ", DEBUG_CHAT_ID)
     logging.warning("wait_commands: THIS FUNCTION IS NOT THREAD SAFE! PLEASE DON'T CALL IT FROM MULTIPLE THREADS")
     if not TG_TOKEN or not CHAT_IDS:
         logger.error("TG_TOKEN or CHAT_ID environment variables are not set.")
