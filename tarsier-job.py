@@ -454,7 +454,10 @@ def low_res_detection_and_capture():
                                 f.unlink()
                             except OSError as e:
                                 logging.info(f"[prune] Failed to remove {f}: {e}")
-
+    
+    except:
+        # TODO: what to do here? maybe remove try block
+        pass
 
 def stitch_worker_thread():
     """
@@ -482,7 +485,7 @@ def stitch_worker_thread():
         logging.info(f"Stitch/send placeholder finished for {folder}")
 
 
-def find_event_video(query: str = "") -> Optional[Path]:
+def find_event_video(query: str = ""):
     """
     Find the video file inside an event folder.
 

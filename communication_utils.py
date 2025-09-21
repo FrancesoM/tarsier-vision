@@ -83,10 +83,10 @@ DEBUG_CHAT_ID = os.getenv("DEBUG_CHAT_ID")
 LAST_UPDATE_ID_PATH = Path(os.getenv("LAST_UPDATE_ID_PATH"))
 
 # Log some debug: 
-logger.info(f"Whitelisted chat ids": WL_CHAT_ID)
-logger.info(f"Whitelisted user ids": WL_USER_ID)
-logger.info(f"Messages will be sent to this id:"SEND_CHAT_ID)
-logger.info(f"Debug will be sent to this id:"DEBUG_CHAT_ID)
+logger.info(f"Whitelisted chat ids: ", WL_CHAT_ID)
+logger.info(f"Whitelisted user ids: ", WL_USER_ID)
+logger.info(f"Messages will be sent to this id: ", SEND_CHAT_ID)
+logger.info(f"Debug will be sent to this id: ", DEBUG_CHAT_ID)
 
 def read_last_update_id() -> int:
     """Reads the last processed update ID from a file using pathlib."""
