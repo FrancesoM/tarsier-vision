@@ -22,6 +22,8 @@ Poor's man Jira
     [ ] Send only image, send video only on request through telegram command. 
         - Have some sort of ID to retrieve a particular video. 
     [ ] Gracefull pause/shutdown
+    [ ] Remove ram segments when it starts not when it stops
+    [ ] 
     [x] Remove some prints especially when acquiring TPU mutex
         - This I/O takes more than the actual TPU processing
         - DONE: just changed the log level to debug 

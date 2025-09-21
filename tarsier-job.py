@@ -159,8 +159,9 @@ interpreter.allocate_tensors()
 labels_lookup = load_labels(labels)
 person_idx = 0
 for i in range(len(labels_lookup)):
-    if labels_lookup[i] == "person":
+    if labels_lookup[i] == "car":
         person_idx = i
+person_idx = 69
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
@@ -185,15 +186,15 @@ def run_tpu_inference(input_data):
 
         return boxes,classes,scores,num
 
-def append_random_word(original_name: str) -> str:
+def get_random_word(original_name: str) -> str:
     # Compute a stable integer hash
     digest = hashlib.sha256(original_name.encode()).digest()
     number = int.from_bytes(digest, "big")
 
     # Pick a word deterministically
-    word = WORDLIST[number % len(WORDLIST)]
+    word = wordlist_id.WORDLIST[number % len(wordlist_id.WORDLIST)]
 
-    return f"{original_name}_{word}"
+    return word
 
 def stitch_segments(segments_dir, output_dir):
     """
@@ -219,8 +220,10 @@ def stitch_segments(segments_dir, output_dir):
     ts = datetime.now().strftime("%Y-%m-%d_at_%H-%M-%S")
 
     # Append random word to the video for easy retrieval
-    video_name = append_random_word(f"event_{ts}")
-    video_name += ".mp4"
+    base_name = f"event_{ts}"
+    ref_id    = get_random_word(base_name)
+
+    video_name = f"{base_name}_{ref_id}.mp4" 
 
     output_file = output_dir / video_name
 
@@ -250,7 +253,7 @@ def stitch_segments(segments_dir, output_dir):
         seg.unlink()
 
     logging.info(f"Final stitched file ready: {output_file}")
-    return output_file
+    return output_file,ref_id
 
 
 def copy_segments_to_event(ram_dir, events_dir, timestamp_str):
@@ -303,7 +306,7 @@ def check_for_person(video_path):
             person_found        = False
             person_object_index = None 
             for i in range(num):
-                if (int(classes[i]) == person_idx) and (scores[i] > 0.00001):
+                if (int(classes[i]) == person_idx) and (scores[i] > 0.25):
                     person_found        = True
                     person_object_index = i
 
@@ -343,6 +346,8 @@ def low_res_detection_and_capture():
 
     curr_state = PipeStates.STOPPED
     next_state = PipeStates.STOPPED
+
+    force_motion=False
 
     try:
         while True:
@@ -405,9 +410,10 @@ def low_res_detection_and_capture():
                 thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
                 motion_area = cv2.countNonZero(thresh)
 
-                if motion_area > 200 or (random.randint(0,100) % 20 == 0): # 5% of random triggering
+                if motion_area > 200 or force_motion: # 5% of random triggering
                     # small debounce: clear deque so we don't trigger repeatedly
                     frame_q.clear()
+                    force_motion = False
 
                     logging.info(f"Detected motion!")
 
@@ -418,8 +424,9 @@ def low_res_detection_and_capture():
 
                     person_found        = False
                     for i in range(num):
+                        #logging.info(f"Found class {classes[i]} with score {scores[i]}")
                         # Basically always find a person
-                        if (int(classes[i]) == person_idx) and (scores[i] > 0.00001):
+                        if (int(classes[i]) == person_idx) and (scores[i] > 0.25):
                             person_found        = True
                             logging.info(f"Person was in frame with confidence {scores[i]}")
 
@@ -479,12 +486,12 @@ def stitch_worker_thread():
         logging.info(f"Received event folder: {folder}")
         # TODO: stitch the MKV segments into a single file and send via Telegram
 
-        video_path = stitch_segments(folder,folder)
+        video_path,ref_id = stitch_segments(folder,folder)
 
         # Double check that a person is detected
         frame_with_person,person_timestamp = check_for_person(video_path)
         if frame_with_person != None:
-            comm.send_photo(frame_with_person.as_posix(),caption=f"Ho trovato qualcosa a {person_timestamp}s, vuoi il video?")
+            comm.send_photo(frame_with_person,caption=f"Ho trovato qualcosa a {person_timestamp}s, vuoi il video (riferimento: {ref_id})?")
             
             # Don't send the video everytime, rather than this, allow for retrieval with a command
             #send_video(video_path.as_posix())
@@ -493,13 +500,12 @@ def stitch_worker_thread():
         time.sleep(2)
         logging.info(f"Done processing for folder: {folder}")
 
-
 def find_event_video(query: str = ""):
     """
     Find the video file inside an event folder.
 
     - If query is empty: return the .mp4 in the most recent folder.
-    - If query is not empty: return the .mp4 in the folder whose name contains query.
+    - If query is not empty: return the .mp4 whose filename contains query.
     - If nothing matches: return None.
     """
 
@@ -510,23 +516,22 @@ def find_event_video(query: str = ""):
         return None
 
     if query:
-        # Filter by substring match
-        matches = [f for f in folders if query in f.name]
-        if not matches:
-            logging.info(f"Can't find any match for {query} in {folders}")
-            return None
-        folder = matches[0]   # take first match
+        # Look inside every folder for mp4 files that match
+        for folder in folders:
+            mp4_files = list(folder.glob("*.mp4"))
+            for mp4 in mp4_files:
+                if query in mp4.name:
+                    return mp4
+        logging.info(f"No .mp4 file found with query '{query}' in {EVENTS_DIR.as_posix()}")
+        return None
     else:
         # Pick the most recently modified folder
         folder = max(folders, key=lambda f: f.stat().st_mtime)
-
-    # Find .mp4 inside the chosen folder
-    mp4_files = list(folder.glob("*.mp4"))
-    if len(mp4_files) != 1:
-        logging.info(f"Can't find any mp4 file in {folder.as_posix()}")
-        return None
-
-    return mp4_files[0]
+        mp4_files = list(folder.glob("*.mp4"))
+        if len(mp4_files) != 1:
+            logging.info(f"Can't find exactly one mp4 in {folder.as_posix()}")
+            return None
+        return mp4_files[0]
 
 # Right now we support only one request: a /video command. 
 # - no payload      -> send most recent video 
@@ -545,8 +550,9 @@ def process_commands():
         if rcv["command"] == "/video":
             # TODO
             video_id = rcv["payload"]
-
-            if find_event_video(video_id) != None:
+            
+            video_path = find_event_video(video_id)
+            if video_path != None:
                 comm.send_video(video_path)
             else:
                 comm.send_text("Non ho trovato il video richiesto")

@@ -99,7 +99,7 @@ def send_photo(image_path: Path, caption: str = "") -> None:
             files = {"photo": photo}
             response = requests.post(API_URL + "sendPhoto", data=params, files=files)
             response.raise_for_status()
-            logging.info(f"Sent photo to {SEND_CHAT_ID}")
+            logging.info(f"Sent photo {image_path.as_posix()} to {SEND_CHAT_ID}")
     except FileNotFoundError:
         logging.error(f"Error: Photo file not found at {image_path}")
     except requests.exceptions.RequestException as e:
@@ -116,7 +116,7 @@ def send_video(video_path: Path) -> None:
             files = {"video": video}
             response = requests.post(API_URL + "sendVideo", data=params, files=files)
             response.raise_for_status()
-            logging.info(f"Sent video to {SEND_CHAT_ID}")
+            logging.info(f"Sent video {video_path.as_posix()} to {SEND_CHAT_ID}")
     except FileNotFoundError:
         logging.error(f"Error: Video file not found at {video_path}")
     except requests.exceptions.RequestException as e:
