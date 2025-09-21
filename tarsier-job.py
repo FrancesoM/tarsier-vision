@@ -336,8 +336,6 @@ def check_for_person(video_path):
 
 def low_res_detection_and_capture():
 
-
-
     # small 2-frame deque logic to avoid false positives
     frame_q = deque(maxlen=2)
 
@@ -362,6 +360,8 @@ def low_res_detection_and_capture():
 
                 time_start = time.perf_counter() # Time in second
 
+                comm.send_text("Avvio la telecamera!")
+
             if curr_state == PipeStates.RUNNING and next_state == PipeStates.STOPPED:
 
                 stop_low_res(cap)
@@ -375,6 +375,9 @@ def low_res_detection_and_capture():
                 files = [f for f in RAM_DIR.iterdir() if f.is_file()]
                 for f in files: 
                     f.unlink()
+
+                comm.send_text("Fermo la telecamera!")
+
 
             curr_state = next_state
 
@@ -462,14 +465,9 @@ def low_res_detection_and_capture():
         pass
 
 def stitch_worker_thread():
-    """
-    Placeholder worker that receives event_folder paths and will stitch/send later.
-    For now, it just logs the event folder; you can implement the stitch + Telegram upload logic here.
-    """
-    comm.send_text("Starting recording")
     while True:
         folder = event_queue.get()
-        logging.info(f"Stitch worker got event folder: {folder}")
+        logging.info(f"Received event folder: {folder}")
         # TODO: stitch the MKV segments into a single file and send via Telegram
 
         video_path = stitch_segments(folder,folder)
@@ -477,14 +475,14 @@ def stitch_worker_thread():
         # Double check that a person is detected
         frame_with_person,person_timestamp = check_for_person(video_path)
         if frame_with_person != None:
-            comm.send_photo(frame_with_person.as_posix(),caption=f"Found a person at {person_timestamp}s")
+            comm.send_photo(frame_with_person.as_posix(),caption=f"Ho trovato qualcosa a {person_timestamp}s, vuoi il video?")
             
             # Don't send the video everytime, rather than this, allow for retrieval with a command
             #send_video(video_path.as_posix())
 
         # For now just sleep to simulate work:
         time.sleep(2)
-        logging.info(f"Stitch/send placeholder finished for {folder}")
+        logging.info(f"Done processing for folder: {folder}")
 
 
 def find_event_video(query: str = ""):
@@ -530,11 +528,9 @@ def process_commands():
 
         if rcv["command"] == "/up": 
             state_queue.put(PipeStates.RUNNING)
-            comm.send_text("Avvio la registrazione")
 
         if rcv["command"] == "/down": 
             state_queue.put(PipeStates.STOPPED)
-            comm.send_text("Fermo la registrazione")
 
         if rcv["command"] == "/video":
             # TODO

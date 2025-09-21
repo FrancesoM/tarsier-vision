@@ -45,9 +45,9 @@
 
 # This library only contains functions and it's stateless so it doesn't really matter if the
 # functions are called from multiple threads. Actually there is one element that keeps a state
-# which is the file that keeps the last id for the updates. I can add a TODO to have a lock on 
-# this file although it doesn't make much sense that multiple threads call the wait_command. 
-
+# which is the last id for the updates. 
+# If multiple threads use the wait function the ID will be de-synch between all of them, so 
+# yes don't use that function from multiple threads. The other functions are fine. 
 
 
 import os
@@ -75,35 +75,6 @@ WL_USER_ID = os.getenv("WL_USER_ID", "").split(",")  # allow multiple IDs, comma
 # When sending a message, send it only to a specific chat defined by another env variable
 SEND_CHAT_ID  = os.getenv("SEND_CHAT_ID")
 DEBUG_CHAT_ID = os.getenv("DEBUG_CHAT_ID")
-
-# To survive reboots/crashes we need to keep track of the last offset since we polled 
-# we therefore need to save it to a file
-# File to store the last processed update ID
-# NOTE: This env variable should map to a location that is persistent in the container, else it's lost 
-# when the container image is deleted. 
-LAST_UPDATE_ID_PATH = Path(os.getenv("LAST_UPDATE_ID_PATH"))
-
-def read_last_update_id() -> int:
-    """Reads the last processed update ID from a file using pathlib."""
-    # Check if the file exists before attempting to read.
-    if LAST_UPDATE_ID_PATH.exists():
-        content = LAST_UPDATE_ID_PATH.read_text().strip()
-        logging.error(f"File {LAST_UPDATE_ID_PATH} exists, reading it")
-        return int(content) if content else 0
-    else:
-        logging.error(f"File {LAST_UPDATE_ID_PATH} doesn't exists, writing it")
-        write_last_update_id(-1)
-        return -1
-
-def write_last_update_id(update_id: int) -> None:
-    """Writes the last processed update ID to a file using pathlib."""
-    logging.info(f"File {LAST_UPDATE_ID_PATH} writing it")
-    try:
-        # Create the parent directory if it doesn't exist.
-        LAST_UPDATE_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
-        LAST_UPDATE_ID_PATH.write_text(str(update_id))
-    except Exception as e:
-        logging.error(f"Failed to write last_update_id to file: {e}")
 
 def send_text(text: str) -> None:
     """
@@ -176,26 +147,17 @@ def wait_commands(queue, allowed_commands):
     logging.info(f"Whitelisted user ids: {WL_USER_ID}")
     logging.info(f"Messages will be sent to this id: {SEND_CHAT_ID}")
     logging.info(f"Debug will be sent to this id: {DEBUG_CHAT_ID}")
-    logging.warning("wait_commands: THIS FUNCTION IS NOT THREAD SAFE! PLEASE DON'T CALL IT FROM MULTIPLE THREADS")
-    #if not TG_TOKEN or not WL_CHAT_ID:
-    #    logging.error("TG_TOKEN or CHAT_ID environment variables are not set.")
-    #    return
-    # Read the last update ID from the file to resume from where we left off
-    try:
-        last_update_id = read_last_update_id()
-        logging.info("Bot started and is polling for updates...")
-    except Exception as e:
-        # Catch the exception and log it
-        logging.error(f"An error occurred in the thread: {e}", exc_info=True)
     
-    updates = get_updates(offset=last_update_id,timeout=1)
+    # Get all the updates that were sent when the program was offline... and discard them automatically. 
+    updates = get_updates(offset=None,timeout=10)
 
-    logging.info(f"Found {len(updates)} since last time, discarding them.. ")
+    logging.info(f"Found {len(updates)} while bot was offline, discarding all of them.. ")
     
     if len(updates) > 0:
         last_update_id = updates[-1]["update_id"] + 1
         logging.info(f"Updating the last update with {last_update_id}")
-        write_last_update_id(last_update_id)
+    else:
+        last_update_id = None
 
     while True:
         try:
@@ -204,8 +166,6 @@ def wait_commands(queue, allowed_commands):
             for update in updates:
                 # Get the last update ID to continue from there
                 last_update_id = update["update_id"] + 1
-                # Write the new last_update_id to the file immediately after processing
-                write_last_update_id(last_update_id)
 
                 # Check if the update is a message and a command
                 if "message" in update and "text" in update["message"]:
@@ -252,6 +212,9 @@ def wait_commands(queue, allowed_commands):
 
 
 if __name__ == "__main__": 
+
+
+    # This is only for testing
     from queue import Queue
     
     logging.setLevel(logging.DEBUG)
