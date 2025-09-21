@@ -84,16 +84,14 @@ LAST_UPDATE_ID_PATH = Path(os.getenv("LAST_UPDATE_ID_PATH"))
 
 def read_last_update_id() -> int:
     """Reads the last processed update ID from a file using pathlib."""
-    try:
-        # Check if the file exists before attempting to read.
-        if LAST_UPDATE_ID_PATH.exists():
-            content = LAST_UPDATE_ID_PATH.read_text().strip()
-            return int(content) if content else 0
-        else:
-            return 0
-    except (FileNotFoundError, ValueError):
-        # Return 0 if the file doesn't exist or is empty/invalid
-        return 0
+
+    # Check if the file exists before attempting to read.
+    if LAST_UPDATE_ID_PATH.exists():
+        content = LAST_UPDATE_ID_PATH.read_text().strip()
+        return int(content) if content else 0
+    else:
+        write_last_update_id(-1)
+        return -1
 
 def write_last_update_id(update_id: int) -> None:
     """Writes the last processed update ID to a file using pathlib."""
