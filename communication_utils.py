@@ -57,6 +57,7 @@ import requests
 from urllib.parse import quote
 from datetime import datetime
 import logging
+import time
 
 # Wokaround so that this stateless module uses the same logger as the main function that imports this 
 # module. 
@@ -84,17 +85,20 @@ LAST_UPDATE_ID_PATH = Path(os.getenv("LAST_UPDATE_ID_PATH"))
 
 def read_last_update_id() -> int:
     """Reads the last processed update ID from a file using pathlib."""
-
     # Check if the file exists before attempting to read.
+    logger.info(f"CIAOOOOO")
     if LAST_UPDATE_ID_PATH.exists():
         content = LAST_UPDATE_ID_PATH.read_text().strip()
+        logger.error(f"File {LAST_UPDATE_ID_PATH} exists, reading it")
         return int(content) if content else 0
     else:
+        logger.error(f"File {LAST_UPDATE_ID_PATH} doesn't exists, writing it")
         write_last_update_id(-1)
         return -1
 
 def write_last_update_id(update_id: int) -> None:
     """Writes the last processed update ID to a file using pathlib."""
+    logger.info(f"File {LAST_UPDATE_ID_PATH} writing it")
     try:
         # Create the parent directory if it doesn't exist.
         LAST_UPDATE_ID_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -157,6 +161,7 @@ def get_updates(offset=None, timeout=600):
     """
     params = {"timeout": timeout, "offset": offset}
     try:
+        logger.info(f"Polling for updates with offset {offset} and timeout {timeout}s...")
         response = requests.get(API_URL + "getUpdates", params=params, timeout=timeout + 5)
         response.raise_for_status()  # Raises an exception for bad status codes
         return response.json()["result"]
@@ -168,22 +173,35 @@ def get_updates(offset=None, timeout=600):
 def wait_commands(queue, allowed_commands):
     
     # Log some debug: 
-    logger.info(f"Whitelisted chat ids: {WL_CHAT_ID}")
+    logger.warning(f"Whitelisted chat ids: {WL_CHAT_ID}")
     logger.info(f"Whitelisted user ids: {WL_USER_ID}")
     logger.info(f"Messages will be sent to this id: {SEND_CHAT_ID}")
     logger.info(f"Debug will be sent to this id: {DEBUG_CHAT_ID}")
-    logging.warning("wait_commands: THIS FUNCTION IS NOT THREAD SAFE! PLEASE DON'T CALL IT FROM MULTIPLE THREADS")
-    if not TG_TOKEN or not CHAT_IDS:
-        logger.error("TG_TOKEN or CHAT_ID environment variables are not set.")
-        return
-
+    logger.warning("wait_commands: THIS FUNCTION IS NOT THREAD SAFE! PLEASE DON'T CALL IT FROM MULTIPLE THREADS")
+    #if not TG_TOKEN or not WL_CHAT_ID:
+    #    logger.error("TG_TOKEN or CHAT_ID environment variables are not set.")
+    #    return
     # Read the last update ID from the file to resume from where we left off
-    last_update_id = read_last_update_id()
-    logger.info("Bot started and is polling for updates...")
+    try:
+        last_update_id = read_last_update_id()
+        logger.info("Bot started and is polling for updates...")
+    except Exception as e:
+        # Catch the exception and log it
+        logger.error(f"An error occurred in the thread: {e}", exc_info=True)
+    
+    updates = get_updates(offset=last_update_id,timeout=1)
+
+    logger.info(f"Found {len(updates)} since last time, discarding them.. ")
+    
+    if len(updates) > 0:
+        last_update_id = updates[-1]["update_id"] + 1
+        logger.info(f"Updating the last update with {last_update_id}")
+        write_last_update_id(last_update_id)
 
     while True:
         try:
             updates = get_updates(offset=last_update_id)
+
             for update in updates:
                 # Get the last update ID to continue from there
                 last_update_id = update["update_id"] + 1
@@ -198,12 +216,12 @@ def wait_commands(queue, allowed_commands):
                     user_first_name = message["from"]["first_name"]
 
                     # Filter by allowed chat IDs
-                    if chat_id not in WL_CHAT_IDS:
+                    if str(chat_id) not in WL_CHAT_ID:
                         logger.warning(f"Message from unauthorized chat ID: {chat_id}")
                         send_message(DEBUG_CHAT_ID, f"Message from {user_first_name} in {chat_id} was blocked")
                         continue
 
-                    if user_id not in WL_USER_IDS:
+                    if str(user_id) not in WL_USER_ID:
                         logger.warning(f"Message from unauthorized user ID: {user_id}")
                         send_message(DEBUG_CHAT_ID, f"Message from {user_first_name} w/ user {user_id} was blocked")
                         continue
@@ -223,6 +241,7 @@ def wait_commands(queue, allowed_commands):
                             payload = ""
                         
                         if command in allowed_commands:
+                            logger.info(f"Setting command: {command} with payload {payload}")
                             queue.put( {"command":command,"payload":payload })
             
             # Simple sleep to prevent excessive API calls
@@ -233,7 +252,20 @@ def wait_commands(queue, allowed_commands):
             time.sleep(5) # Wait before retrying
 
 
+if __name__ == "__main__": 
+    from queue import Queue
+    
+    logger.setLevel(logging.DEBUG)
+    if not logger.handlers:
+        ch = logging.StreamHandler()
+        ch.setLevel(logging.DEBUG)
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        ch.setFormatter(formatter)
+        logger.addHandler(ch)
 
+    queue = Queue()
+    ALLOWED_COMMANDS = ["/video","/up","/down"]
+    wait_commands(queue,ALLOWED_COMMANDS)
 
 
 

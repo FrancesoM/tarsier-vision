@@ -100,6 +100,8 @@ class PipeStates:
     RUNNING = 0
     STOPPED = 1
 
+state_queue = Queue()
+
 # Helper functions to start/stop the GST streamer pipelines
 def start_low_res():
     logging.info(f"Opening low-res pipeline: {LOW_RES_PIPELINE}")
