@@ -36,6 +36,9 @@ Poor's man Jira
         - DONE: just changed the log level to debug 
     [x] Send text message with video, timestamp at which the person is detected
     [x] Script docker run command
+    [ ] Commands are duplicated when checking and when passed as a list to the communication functions
+    [ ] Handle the fact that the command can arrive as "\<cmd>" or "\<cmd>@<botname>" because iphones in group 
+        append that automatically, and in the future android might change as well
 
 +   Nice to have 
     [ ] Run inference over whole video and draw boxes

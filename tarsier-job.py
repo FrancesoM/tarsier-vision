@@ -494,8 +494,7 @@ def stitch_worker_thread():
     while True:
         folder = event_queue.get()
         logging.info(f"Received event folder: {folder}")
-        # TODO: stitch the MKV segments into a single file and send via Telegram
-
+        
         video_path,ref_id = stitch_segments(folder,folder)
 
         # Double check that a person is detected
