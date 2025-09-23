@@ -488,9 +488,6 @@ def stitch_worker_thread():
         frame_with_person,person_timestamp = check_for_person(video_path)
         if frame_with_person != None:
             comm.send_photo(frame_with_person,caption=f"Ho trovato qualcosa a {person_timestamp}s, vuoi il video (riferimento: {ref_id})?")
-            
-            # Don't send the video everytime, rather than this, allow for retrieval with a command
-            #send_video(video_path.as_posix())
 
         # For now just sleep to simulate work:
         time.sleep(2)
@@ -549,12 +546,43 @@ def process_commands():
             
             video_path = find_event_video(video_id)
             if video_path != None:
-                comm.send_video(video_path)
+                comm.send_video_as_file(video_path)
             else:
                 comm.send_text("Non ho trovato il video richiesto")
     
         # Don't spin too much on checking the queue. 
         time.sleep(1)
+
+# Cleanup of folders older than threshold
+SLEEP_HOURS  = 24
+DAYS_TO_KEEP = 4
+
+def cleanup():
+    """Delete subfolders older than DAYS_TO_KEEP days."""
+    now = datetime.now()
+    cutoff = now - timedelta(days=DAYS_TO_KEEP)
+
+    if not EVENTS_DIR.exists():
+        logging.warning(f"Folder {EVENTS_DIR} does not exist.")
+        return
+
+    for entry in EVENTS_DIR.iterdir():
+        if entry.is_dir():
+            mtime = datetime.fromtimestamp(entry.stat().st_mtime)
+            if mtime < cutoff:
+                try:
+                    shutil.rmtree(entry)
+                    logging.info(f"Deleted folder: {entry}")
+                except Exception as e:
+                    logging.error(f"Failed to delete {entry}: {e}")
+
+def cleanup_loop():
+    """Thread that runs cleanup every SLEEP_HOURS."""
+    while True:
+        cleanup()
+        logging.info(f"Sleeping for {SLEEP_HOURS}h...")
+        time.sleep(SLEEP_HOURS * 3600)
+
 
 # ----------------- Main -----------------
 def main():
@@ -579,11 +607,15 @@ def main():
     low_res_detection_and_capture_thread = threading.Thread(target=low_res_detection_and_capture, name="PipelinesWorker", daemon=True)
     low_res_detection_and_capture_thread.start()
 
+    cleanup_loop_thread = threading.Thread(target=cleanup_loop, name="CleanupWorker", daemon=True)
+    cleanup_loop_thread.start()
+
 
     stitch_thread.join()
     polling_thread.join()
     process_commands_thread.join()
     low_res_detection_and_capture_thread.join()
+    cleanup_loop_thread.join()
 
 if __name__ == "__main__":
     main()

@@ -122,6 +122,23 @@ def send_video(video_path: Path) -> None:
     except requests.exceptions.RequestException as e:
         logging.error(f"Error sending video to {SEND_CHAT_ID}: {e}")
         
+def send_video_as_file(video_path: Path) -> None:
+    """
+    Sends a local video file as a document to the configured chat ID.
+    This keeps its original aspect and skips Telegram's media preprocessing.
+    """
+    params = {"chat_id": SEND_CHAT_ID}
+    try:
+        with video_path.open("rb") as video:
+            files = {"document": video}
+            response = requests.post(API_URL + "sendDocument", data=params, files=files)
+            response.raise_for_status()
+            logging.info(f"Sent video as file {video_path.as_posix()} to {SEND_CHAT_ID}")
+    except FileNotFoundError:
+        logging.error(f"Error: Video file not found at {video_path}")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Error sending video file to {SEND_CHAT_ID}: {e}")
+    
 # Performs long polling https://core.telegram.org/bots/api#getupdates
 # 10 minutes should be enough to not flood the server with requests 
 def get_updates(offset=None, timeout=600):
