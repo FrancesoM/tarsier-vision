@@ -263,6 +263,19 @@ def copy_segments_to_event(ram_dir, events_dir, timestamp_str):
 
     return event_folder
 
+def move_segments_to_event(ram_dir: Path, events_dir: Path, timestamp_str: str) -> Path:
+    """Move latest max_segments from ram_dir into a new event folder and return path."""
+    
+    event_folder = events_dir / f"event_{timestamp_str}"
+    event_folder.mkdir(parents=True, exist_ok=True)
+
+    # Move contents of ram_dir into event_folder
+    for item in ram_dir.iterdir():
+        dest = event_folder / item.name
+        shutil.move(item, dest)  # move requires str or Path-like
+
+    return event_folder
+
 def check_for_person(video_path):
     cap = cv2.VideoCapture(video_path.as_posix())
     
@@ -436,8 +449,10 @@ def low_res_detection_and_capture():
                         # wait for the post-buffer duration (during this time splitmuxsink keeps writing new segments)
                         time.sleep(POST_BUFFER_SECS)
 
-                        # Copy those latest segments to event folder
-                        event_folder = copy_segments_to_event(RAM_DIR, EVENTS_DIR, ts)
+                        # Move those latest segments to event folder
+                        # We move them because else if it's immediately triggered the next video overlaps
+                        # with the previous one. 
+                        event_folder = move_segments_to_event(RAM_DIR, EVENTS_DIR, ts)
 
                         # notify stitch/send thread with the event folder path
                         event_queue.put(event_folder)
