@@ -12,18 +12,25 @@ Poor's man Jira
 
 
 ++  Must have:
-    [ ] Double check why first sent video is high quality, the next ones are lower
+    [x] Double check why first sent video is high quality, the next ones are lower
         - This is still somehow happening, some videos are sent with slightly less w*h size
-    [ ] Script should be launchable as cron job
+        - It was a problem with how iPhone visualize the video, the sending part is fine
+        - DONE: sending video as a file
+    [x] Script should be launchable as cron job
         - Cron job should also be the entire container that should run not as interactive but just as a containered app
+        - DONE: it's not a cronjob but rather a docker container with an autorestart policy
     [n] Start/Stop gated by reading a GPIO (missing hardware at the moment)
         - Won't do, we use telegram buttons. 
-    [ ] Start stop based on telegram commands, therefore implement parsing and polling on tarsier-job side
-    [ ] Send only image, send video only on request through telegram command. 
+    [x] Start stop based on telegram commands, therefore implement parsing and polling on tarsier-job side
+        - DONE: Telegram commands implemented and parsed after long polling
+
+    [x] Send only image, send video only on request through telegram command. 
         - Have some sort of ID to retrieve a particular video. 
-    [ ] Gracefull pause/shutdown
-    [ ] Remove ram segments when it starts not when it stops
-    [ ] 
+        - ID added calculated as an index from the video name's SHA (for reproducibility)
+    [x] Gracefull pause/shutdown
+        - DONE considering states are correctly initialized at startup, and shutdown is less important
+    [x] Remove ram segments when it starts not when it stops
+    [x] Move segments instead of copying them  
     [x] Remove some prints especially when acquiring TPU mutex
         - This I/O takes more than the actual TPU processing
         - DONE: just changed the log level to debug 
