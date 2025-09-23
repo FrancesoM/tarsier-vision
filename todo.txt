@@ -37,8 +37,15 @@ Poor's man Jira
     [x] Send text message with video, timestamp at which the person is detected
     [x] Script docker run command
     [ ] Commands are duplicated when checking and when passed as a list to the communication functions
-    [ ] Handle the fact that the command can arrive as "\<cmd>" or "\<cmd>@<botname>" because iphones in group 
+    [x] Handle the fact that the command can arrive as "\<cmd>" or "\<cmd>@<botname>" because iphones in group 
         append that automatically, and in the future android might change as well
+        - DONE: check with "startswith" instead of equality. It's stricter than <string> in <text> but might still allow
+          some false positives, like \up and \uptown match. However the commands are a lmiited set that is agreed upon
+          so we can allow these rules. 
+    [x] Add a command to trigger, so remotely you can check instantly what is happening. Also useful for debug.
+        - DONE: the queue between process commands thread and pipelines thread now supports different commands, mainly
+          through a custom dictionary in the queue. Meaning of the message depends on the keys, multiple keys technically
+          can be passed like {"STATE":RUNNING,"TRIGGER":1} although it's never done. 
 
 +   Nice to have 
     [ ] Run inference over whole video and draw boxes
