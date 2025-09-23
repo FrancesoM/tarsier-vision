@@ -164,6 +164,8 @@ def wait_commands(queue, allowed_commands):
     logging.info(f"Whitelisted user ids: {WL_USER_ID}")
     logging.info(f"Messages will be sent to this id: {SEND_CHAT_ID}")
     logging.info(f"Debug will be sent to this id: {DEBUG_CHAT_ID}")
+
+    send_text("Qualcuno ha attaccato la spina!")
     
     # Get all the updates that were sent when the program was offline... and discard them automatically. 
     updates = get_updates(offset=None,timeout=1)
