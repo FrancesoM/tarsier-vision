@@ -100,7 +100,7 @@ class PipeStates:
     RUNNING = 0
     STOPPED = 1
 
-state_queue = Queue()
+telegram_to_pipeline_queue = Queue()
 
 # Helper functions to start/stop the GST streamer pipelines
 def start_low_res():
@@ -363,9 +363,23 @@ def low_res_detection_and_capture():
             # This queue can't block, it affects the program flow only if it has a new element inside
             # which means someone wants to change the state. 
             try:
-                next_state = state_queue.get(block=False)
+                # We receive a dictionary because this queue can contain a command to go up/down 
+                # but also a forced trigger. Another solution would be to use 2 queues. 
+                message = telegram_to_pipeline_queue.get(block=False)
+                    
+                # Default
+                next_state = curr_state
+                trigger    = 0
+
+                if "STATE" in message.keys():
+                    next_state = message["STATE"]
+
+                if "TRIGGER" in message.keys():
+                    trigger = message["TRIGGER"]
+
             except Empty:
                 next_state = curr_state
+                trigger    = 0
 
             if curr_state == PipeStates.STOPPED and next_state == PipeStates.RUNNING:
                 # Here we start the pipelines
@@ -419,11 +433,14 @@ def low_res_detection_and_capture():
                 thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
                 motion_area = cv2.countNonZero(thresh)
 
-                if motion_area > 200:    # tune threshold
+                if motion_area > 200 or trigger == 1:    # tune threshold
                     # small debounce: clear deque so we don't trigger repeatedly
                     frame_q.clear()
 
-                    logging.info(f"Detected motion!")
+                    if trigger == 0:
+                        logging.info("Detected motion!")
+                    else:
+                        logging.info("Forced triggered!")
 
                     # frame is already the right dimension, let's just convert to 8bits
                     input_data = np.expand_dims(np.array(frame, dtype=np.uint8), axis=0)
@@ -438,11 +455,16 @@ def low_res_detection_and_capture():
                             person_found        = True
                             logging.info(f"Person was in frame with confidence {scores[i]}")
 
-                    if person_found:
+                    if person_found or trigger == 1:
 
                         # Person detected -> capture event
                         ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                        logging.info(f"Person detected at {ts} — will wait {POST_BUFFER_SECS}s to capture post-buffer")
+
+                        if trigger == 0:
+                            logging.info(f"Person detected at {ts} — will wait {POST_BUFFER_SECS}s to capture post-buffer")
+                        else:
+                            logging.info(f"Trigger received — will wait {POST_BUFFER_SECS}s to capture post-buffer")
+
 
                         # wait for the post-buffer duration (during this time splitmuxsink keeps writing new segments)
                         time.sleep(POST_BUFFER_SECS)
@@ -458,6 +480,9 @@ def low_res_detection_and_capture():
                         logging.info(f"Event folder queued for post-processing: {event_folder}")
 
                         frame_q.clear()
+
+                        trigger = 0 # Trigger is reset at the beginning, but just to be sure 
+
 
                 # small sleep to yield — low-res pipeline already runs at 10fps via pipeline
                 time.sleep(0.005)
@@ -501,6 +526,10 @@ def stitch_worker_thread():
         frame_with_person,person_timestamp = check_for_person(video_path)
         if frame_with_person != None:
             comm.send_photo(frame_with_person,caption=f"Ho trovato qualcosa a {person_timestamp}s, vuoi il video (riferimento: {ref_id})?")
+        else:
+            # False trigger or forced trigger, don't send a picture (we don't have it, just notify the user with the ref)
+            comm.send_text(f"Ho registrato un video ma non ho trovato nessuna persona. Può essere stato un falso allarme oppure hai richiesto tu il video. Per controllarlo tu stesso usa questo riferimento: {ref_id} ")
+
 
         # For now just sleep to simulate work:
         time.sleep(2)
@@ -547,13 +576,13 @@ def process_commands():
         rcv = command_queue.get()
         
         logging.info(f"Received command {rcv}")
-        if rcv["command"] == "/up": 
-            state_queue.put(PipeStates.RUNNING)
+        if rcv["command"].startswith("/up"): 
+            telegram_to_pipeline_queue.put({"STATE":PipeStates.RUNNING})
 
-        if rcv["command"] == "/down": 
-            state_queue.put(PipeStates.STOPPED)
+        if rcv["command"].startswith("/down"): 
+            telegram_to_pipeline_queue.put({"STATE":PipeStates.STOPPED})
 
-        if rcv["command"] == "/video":
+        if rcv["command"].startswith("/video"):
             # TODO
             video_id = rcv["payload"]
             
@@ -562,7 +591,12 @@ def process_commands():
                 comm.send_video_as_file(video_path)
             else:
                 comm.send_text("Non ho trovato il video richiesto")
-    
+        
+        if rcv["command"].startswith("/trigger"):
+            logging.info("Forcing a trigger")
+            telegram_to_pipeline_queue.put({"TRIGGER":1})
+
+
         # Don't spin too much on checking the queue. 
         time.sleep(1)
 
