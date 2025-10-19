@@ -63,9 +63,9 @@ for f in RAM_DIR.iterdir():
         f.unlink()
 
 # Segment / buffering parameters
-SEGMENT_TIME_SECS = 10                         # each MKV segment length
-PRE_BUFFER_SECS = 120                          # total rolling buffer to keep (2 minutes)
-POST_BUFFER_SECS = 60                          # after trigger, wait this much to copy future
+SEGMENT_TIME_SECS = 5                         # each MKV segment length
+PRE_BUFFER_SECS = 10                          # total rolling buffer to keep (20 seconds)
+POST_BUFFER_SECS = 40                          # after trigger, wait this much to copy future
 MAX_SEGMENTS = max(1, PRE_BUFFER_SECS // SEGMENT_TIME_SECS)
 
 # Low-res pipeline (for motion detection / TPU)
@@ -225,20 +225,18 @@ def stitch_segments(segments_dir, output_dir):
 
     output_file = output_dir / video_name
 
-    # Run ffmpeg (stream copy, with re-encoding)
+    # Run ffmpeg (stream copy, without re-encoding)
     cmd = [
         "ffmpeg",
         "-y",
         "-f", "concat",
         "-safe", "0",
         "-i", filelist_path.as_posix(),
-        "-c:v", "libx264",      # re-encode video to H.264
-        "-c:a", "aac",          # re-encode audio to AAC
-        "-preset", "fast",      # optional, speeds up encoding
-        "-movflags", "+faststart",  # ensures MP4 is streamable
-        output_file.as_posix()             # final output file
+        "-an",                      # drop audio completely
+        "-c", "copy",               # copy video streams directly, no re-encode
+        "-movflags", "+faststart",  # optional: makes MP4 web-streamable
+        output_file.as_posix()
     ]
-
     logging.info(f"Stitching {len(segments)} segments into {output_file} with command {cmd}")
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -312,7 +310,7 @@ def check_for_person(video_path):
             ####################################################################################################
 
             draw = ImageDraw.Draw(img)
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size=32)
+            #font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size=32)
 
             person_found        = False
             person_object_index = None 
@@ -334,7 +332,7 @@ def check_for_person(video_path):
 
                 text_label = f"person {scores[person_object_index]:.2f}"
                 draw.rectangle([left, top, right, bottom], outline="red", width=3)
-                draw.text((left, top - 10), text_label, fill="red", font=font)
+                #draw.text((left, top - 10), text_label, fill="red", font=font)
                 
                 video_folder_path = video_path.parent
                 image_name        = video_path.stem + "_first.jpg"
