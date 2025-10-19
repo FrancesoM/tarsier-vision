@@ -92,7 +92,7 @@ event_queue   = Queue()
 
 # TODO: when checking the command, we should tie the handler to this string else
 # we re-write the string twiece and we have to change it twice
-ALLOWED_COMMANDS = ["/video","/up","/down"]
+ALLOWED_COMMANDS = ["/video","/up","/down","/now"]
 command_queue = Queue()
 
 # Stop/Start logic 
@@ -592,7 +592,7 @@ def process_commands():
             else:
                 comm.send_text("Non ho trovato il video richiesto")
         
-        if rcv["command"].startswith("/trigger"):
+        if rcv["command"].startswith("/now"):
             logging.info("Forcing a trigger")
             telegram_to_pipeline_queue.put({"TRIGGER":1})
 

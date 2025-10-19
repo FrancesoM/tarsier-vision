@@ -245,7 +245,7 @@ if __name__ == "__main__":
         logging.addHandler(ch)
 
     queue = Queue()
-    ALLOWED_COMMANDS = ["/video","/up","/down"]
+    ALLOWED_COMMANDS = ["/video","/up","/down","/now"]
     wait_commands(queue,ALLOWED_COMMANDS)
 
 
